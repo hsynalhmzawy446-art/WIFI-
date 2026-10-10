@@ -1,0 +1,40 @@
+name: Build CudyGuard APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extract source
+        run: |
+          unzip -o CudyGuard-Android-source-1.zip -d source
+          find source -type f -name gradlew
+
+      - name: Build APK
+        run: |
+          cd source
+          PROJECT_DIR=$(find . -name gradlew -type f -printf '%h\n' | head -n 1)
+          cd "$PROJECT_DIR"
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CudyGuard-APK
+          path: source/**/app/build/outputs/apk/debug/app-debug.apk
