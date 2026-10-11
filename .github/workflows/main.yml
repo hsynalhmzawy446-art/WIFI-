@@ -1,40 +1,51 @@
 name: Build CudyGuard APK
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+  - name: Set up Java
+    uses: actions/setup-java@v5
+    with:
+      distribution: temurin
+      java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+  - name: Set up Android SDK
+    uses: android-actions/setup-android@v3
 
-      - name: Extract source
-        run: |
-          unzip -o CudyGuard-Android-source-1.zip -d source
-          find source -type f -name gradlew
+  - name: Accept Android SDK licenses
+    run: yes | sdkmanager --licenses
 
-      - name: Build APK
-        run: |
-          cd source
-          PROJECT_DIR=$(find . -name gradlew -type f -printf '%h\n' | head -n 1)
-          cd "$PROJECT_DIR"
-          chmod +x gradlew
-          ./gradlew assembleDebug
+  - name: Install Android SDK components
+    run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: CudyGuard-APK
-          path: source/**/app/build/outputs/apk/debug/app-debug.apk
+  - name: Extract source
+    run: |
+      unzip -o CudyGuard-Android-source-1.zip -d source
+      find source -type f -name gradlew
+
+  - name: Build APK
+    run: |
+      cd source
+      PROJECT_DIR=$(find . -name gradlew -type f -printf '%h\n' | head -n 1)
+      if [ -z "$PROJECT_DIR" ]; then
+        echo "ERROR: gradlew was not found in the ZIP archive"
+        exit 1
+      fi
+      cd "$PROJECT_DIR"
+      chmod +x gradlew
+      ./gradlew assembleDebug
+
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: CudyGuard-APK
+      path: source/**/app/build/outputs/apk/debug/app-debug.apk
+      if-no-files-found: error
