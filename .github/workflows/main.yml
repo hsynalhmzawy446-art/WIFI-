@@ -30,7 +30,6 @@ jobs:
 
       - name: Build APK
         run: |
-          # البحث عن المجلد الذي يحتوي settings.gradle والدخول إليه للبناء
           PROJECT_DIR=$(find . -name "settings.gradle" -exec dirname {} \;)
           echo "Building in directory: $PROJECT_DIR"
           cd "$PROJECT_DIR"
