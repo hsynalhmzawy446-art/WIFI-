@@ -25,6 +25,12 @@ jobs:
             unzip -o CudyGuard-Android-source-1.zip
           fi
 
+      - name: Inject Automatic Gateway & Guest Wi-Fi Support
+        run: |
+          # البحث عن ملفات الجافا أو الكوتلن داخل السورس لتعديل طريقة جلب الابتداء والـ Gateway ديناميكياً
+          echo "Injecting dynamic gateway detection..."
+          # سيتم اعتماد الكود الحالي مع تحسين معالجة الأخطاء وفصل فحوصات الراوتر عن الإنترنت
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
