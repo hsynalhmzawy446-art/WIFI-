@@ -22,19 +22,192 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Extract Source Code
+      - name: Create Android project
         shell: bash
         run: |
           set -e
-          mkdir -p extracted
-          unzip -oq CudyGuard-Android-source-1.zip -d extracted
-          PROJECT_DIR="$(find extracted -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit | xargs -r dirname)"
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "Android project not found"
-            exit 1
-          fi
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project found: $PROJECT_DIR"
+
+          mkdir -p CudyGuard/app/src/main/java/com/h16h/cudyguard
+
+          cd CudyGuard
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "CudyGuard"
+          include(":app")
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.h16h.cudyguard'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.h16h.cudyguard'
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 2
+                  versionName '1.1'
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+              <application
+                  android:label="CudyGuard"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/h16h/cudyguard/MainActivity.java <<'EOF'
+          package com.h16h.cudyguard;
+
+          import android.app.Activity;
+          import android.content.Context;
+          import android.graphics.Color;
+          import android.net.ConnectivityManager;
+          import android.net.DhcpInfo;
+          import android.net.Network;
+          import android.net.NetworkCapabilities;
+          import android.net.wifi.WifiManager;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          public class MainActivity extends Activity {
+              TextView gatewayText;
+              TextView internetText;
+
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  LinearLayout layout = new LinearLayout(this);
+                  layout.setOrientation(LinearLayout.VERTICAL);
+                  layout.setPadding(24, 32, 24, 24);
+                  layout.setBackgroundColor(Color.rgb(245, 249, 246));
+
+                  TextView title = new TextView(this);
+                  title.setText("CudyGuard");
+                  title.setTextSize(30);
+                  title.setTextColor(Color.rgb(20, 110, 70));
+                  title.setGravity(Gravity.CENTER);
+                  layout.addView(title);
+
+                  gatewayText = new TextView(this);
+                  gatewayText.setTextSize(18);
+                  gatewayText.setPadding(0, 28, 0, 20);
+                  layout.addView(gatewayText);
+
+                  internetText = new TextView(this);
+                  internetText.setTextSize(18);
+                  internetText.setPadding(0, 10, 0, 20);
+                  layout.addView(internetText);
+
+                  Button button = new Button(this);
+                  button.setText("فحص الآن");
+                  button.setOnClickListener(v -> checkNetwork());
+                  layout.addView(button);
+
+                  setContentView(layout);
+                  checkNetwork();
+              }
+
+              void checkNetwork() {
+                  String gateway = "غير معروف";
+
+                  try {
+                      WifiManager wifi = (WifiManager)
+                          getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+
+                      if (wifi != null && wifi.isWifiEnabled()) {
+                          DhcpInfo info = wifi.getDhcpInfo();
+
+                          if (info != null && info.gateway != 0) {
+                              int ip = info.gateway;
+                              gateway = (ip & 255) + "." +
+                                  ((ip >> 8) & 255) + "." +
+                                  ((ip >> 16) & 255) + "." +
+                                  ((ip >> 24) & 255);
+                          }
+                      }
+                  } catch (Exception ignored) {
+                  }
+
+                  gatewayText.setText("عنوان الراوتر: " + gateway);
+
+                  boolean online = false;
+
+                  try {
+                      ConnectivityManager manager =
+                          (ConnectivityManager) getSystemService(
+                              Context.CONNECTIVITY_SERVICE);
+
+                      Network network = manager.getActiveNetwork();
+
+                      if (network != null) {
+                          NetworkCapabilities caps =
+                              manager.getNetworkCapabilities(network);
+
+                          online = caps != null &&
+                              caps.hasCapability(
+                                  NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                              caps.hasCapability(
+                                  NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                      }
+                  } catch (Exception ignored) {
+                  }
+
+                  internetText.setText(
+                      "الإنترنت: " + (online ? "متصل" : "غير متصل أو غير متحقق منه"));
+              }
+          }
+          EOF
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -43,16 +216,14 @@ jobs:
         shell: bash
         run: |
           set -e
-          cd "$PROJECT_DIR"
+          cd CudyGuard
           gradle --no-daemon assembleDebug --stacktrace
-          APK="$(find app/build/outputs/apk -type f -name '*.apk' -print -quit)"
-          if [ -z "$APK" ]; then
-            echo "APK not found"
-            exit 1
-          fi
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+
           mkdir -p "$GITHUB_WORKSPACE/output"
           cp "$APK" "$GITHUB_WORKSPACE/output/CudyGuard-debug.apk"
-          ls -lh "$GITHUB_WORKSPACE/output/CudyGuard-debug.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
