@@ -28,7 +28,6 @@ jobs:
           set -e
 
           mkdir -p CudyGuard/app/src/main/java/com/h16h/cudyguard
-
           cd CudyGuard
 
           cat > settings.gradle <<'EOF'
@@ -74,29 +73,33 @@ jobs:
                   applicationId 'com.h16h.cudyguard'
                   minSdk 23
                   targetSdk 35
-                  versionCode 2
-                  versionName '1.1'
+                  versionCode 3
+                  versionName '1.2'
               }
           }
           EOF
 
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
               <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
-              <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
               <application
                   android:label="CudyGuard"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
+
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
+
                   </activity>
               </application>
           </manifest>
@@ -105,31 +108,53 @@ jobs:
           cat > app/src/main/java/com/h16h/cudyguard/MainActivity.java <<'EOF'
           package com.h16h.cudyguard;
 
+          import android.Manifest;
           import android.app.Activity;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
           import android.content.Context;
+          import android.content.pm.PackageManager;
           import android.graphics.Color;
           import android.net.ConnectivityManager;
           import android.net.DhcpInfo;
           import android.net.Network;
           import android.net.NetworkCapabilities;
           import android.net.wifi.WifiManager;
+          import android.os.Build;
           import android.os.Bundle;
           import android.view.Gravity;
           import android.widget.Button;
           import android.widget.LinearLayout;
           import android.widget.TextView;
+          import android.widget.Toast;
+          import android.app.Notification;
+          import android.app.PendingIntent;
 
           public class MainActivity extends Activity {
-              TextView gatewayText;
-              TextView internetText;
+
+              private TextView gatewayText;
+              private TextView routerText;
+              private TextView internetText;
+              private String previousRouterState = "";
+              private boolean firstCheck = true;
 
               @Override
               public void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
 
+                  createNotificationChannel();
+
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                      checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                          != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(
+                          new String[]{Manifest.permission.POST_NOTIFICATIONS}, 10);
+                  }
+
                   LinearLayout layout = new LinearLayout(this);
                   layout.setOrientation(LinearLayout.VERTICAL);
-                  layout.setPadding(24, 32, 24, 24);
+                  layout.setPadding(28, 36, 28, 28);
+                  layout.setGravity(Gravity.TOP);
                   layout.setBackgroundColor(Color.rgb(245, 249, 246));
 
                   TextView title = new TextView(this);
@@ -139,75 +164,229 @@ jobs:
                   title.setGravity(Gravity.CENTER);
                   layout.addView(title);
 
+                  TextView subtitle = new TextView(this);
+                  subtitle.setText("حارس اتصال الراوتر");
+                  subtitle.setTextSize(17);
+                  subtitle.setGravity(Gravity.CENTER);
+                  subtitle.setPadding(0, 8, 0, 28);
+                  layout.addView(subtitle);
+
                   gatewayText = new TextView(this);
                   gatewayText.setTextSize(18);
-                  gatewayText.setPadding(0, 28, 0, 20);
+                  gatewayText.setPadding(0, 12, 0, 18);
                   layout.addView(gatewayText);
+
+                  routerText = new TextView(this);
+                  routerText.setTextSize(18);
+                  routerText.setPadding(0, 12, 0, 18);
+                  layout.addView(routerText);
 
                   internetText = new TextView(this);
                   internetText.setTextSize(18);
-                  internetText.setPadding(0, 10, 0, 20);
+                  internetText.setPadding(0, 12, 0, 24);
                   layout.addView(internetText);
 
                   Button button = new Button(this);
                   button.setText("فحص الآن");
-                  button.setOnClickListener(v -> checkNetwork());
+                  button.setOnClickListener(v -> checkNetwork(true));
                   layout.addView(button);
 
+                  TextView note = new TextView(this);
+                  note.setText(
+                      "تگدر تفحص اتصال الراوتر حتى لو الإنترنت مقطوع. " +
+                      "خلي التطبيق مفتوح حتى يلاحظ تغيّر الاتصال.");
+                  note.setTextSize(14);
+                  note.setPadding(0, 24, 0, 0);
+                  layout.addView(note);
+
                   setContentView(layout);
-                  checkNetwork();
+                  checkNetwork(false);
               }
 
-              void checkNetwork() {
-                  String gateway = "غير معروف";
-
-                  try {
-                      WifiManager wifi = (WifiManager)
-                          getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-
-                      if (wifi != null && wifi.isWifiEnabled()) {
-                          DhcpInfo info = wifi.getDhcpInfo();
-
-                          if (info != null && info.gateway != 0) {
-                              int ip = info.gateway;
-                              gateway = (ip & 255) + "." +
-                                  ((ip >> 8) & 255) + "." +
-                                  ((ip >> 16) & 255) + "." +
-                                  ((ip >> 24) & 255);
-                          }
-                      }
-                  } catch (Exception ignored) {
-                  }
-
+              private void checkNetwork(boolean showMessage) {
+                  String gateway = getGateway();
                   gatewayText.setText("عنوان الراوتر: " + gateway);
 
-                  boolean online = false;
+                  boolean routerConnected = false;
 
+                  if (!gateway.equals("غير معروف")) {
+                      routerConnected = canReachGateway(gateway);
+                  }
+
+                  String state = routerConnected ? "متصل" : "غير متصل";
+                  routerText.setText("اتصال الراوتر: " + state);
+
+                  boolean internet = hasValidatedInternet();
+                  internetText.setText(
+                      "الإنترنت: " + (internet ? "متصل" : "غير متصل"));
+
+                  if (!firstCheck &&
+                      !previousRouterState.equals(state)) {
+                      sendStatusNotification(
+                          "تغيّرت حالة اتصال الراوتر",
+                          "اتصال الراوتر الآن: " + state);
+                  }
+
+                  previousRouterState = state;
+                  firstCheck = false;
+
+                  if (showMessage) {
+                      Toast.makeText(
+                          this,
+                          "اكتمل الفحص",
+                          Toast.LENGTH_SHORT
+                      ).show();
+                  }
+              }
+
+              private String getGateway() {
+                  try {
+                      WifiManager wifi = (WifiManager)
+                          getApplicationContext().getSystemService(
+                              Context.WIFI_SERVICE);
+
+                      if (wifi == null || !wifi.isWifiEnabled()) {
+                          return "غير معروف";
+                      }
+
+                      DhcpInfo info = wifi.getDhcpInfo();
+
+                      if (info == null || info.gateway == 0) {
+                          return "غير معروف";
+                      }
+
+                      int ip = info.gateway;
+
+                      return (ip & 255) + "." +
+                          ((ip >> 8) & 255) + "." +
+                          ((ip >> 16) & 255) + "." +
+                          ((ip >> 24) & 255);
+
+                  } catch (Exception e) {
+                      return "غير معروف";
+                  }
+              }
+
+              private boolean canReachGateway(String gateway) {
+                  java.net.Socket socket = new java.net.Socket();
+
+                  try {
+                      socket.connect(
+                          new java.net.InetSocketAddress(gateway, 80), 1200);
+                      return true;
+                  } catch (Exception ignored) {
+                  } finally {
+                      try {
+                          socket.close();
+                      } catch (Exception ignored) {
+                      }
+                  }
+
+                  socket = new java.net.Socket();
+
+                  try {
+                      socket.connect(
+                          new java.net.InetSocketAddress(gateway, 443), 1200);
+                      return true;
+                  } catch (Exception ignored) {
+                      return false;
+                  } finally {
+                      try {
+                          socket.close();
+                      } catch (Exception ignored) {
+                      }
+                  }
+              }
+
+              private boolean hasValidatedInternet() {
                   try {
                       ConnectivityManager manager =
                           (ConnectivityManager) getSystemService(
                               Context.CONNECTIVITY_SERVICE);
 
+                      if (manager == null) {
+                          return false;
+                      }
+
                       Network network = manager.getActiveNetwork();
 
-                      if (network != null) {
-                          NetworkCapabilities caps =
-                              manager.getNetworkCapabilities(network);
-
-                          online = caps != null &&
-                              caps.hasCapability(
-                                  NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                              caps.hasCapability(
-                                  NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                      if (network == null) {
+                          return false;
                       }
-                  } catch (Exception ignored) {
+
+                      NetworkCapabilities caps =
+                          manager.getNetworkCapabilities(network);
+
+                      return caps != null &&
+                          caps.hasCapability(
+                              NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                          caps.hasCapability(
+                              NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+
+                  } catch (Exception e) {
+                      return false;
+                  }
+              }
+
+              private void createNotificationChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel channel =
+                          new NotificationChannel(
+                              "cudyguard_status",
+                              "حالة الراوتر",
+                              NotificationManager.IMPORTANCE_DEFAULT);
+
+                      NotificationManager manager =
+                          getSystemService(NotificationManager.class);
+
+                      if (manager != null) {
+                          manager.createNotificationChannel(channel);
+                      }
+                  }
+              }
+
+              private void sendStatusNotification(
+                  String title, String message) {
+
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                      checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                          != PackageManager.PERMISSION_GRANTED) {
+                      return;
                   }
 
-                  internetText.setText(
-                      "الإنترنت: " + (online ? "متصل" : "غير متصل أو غير متحقق منه"));
+                  NotificationManager manager =
+                      (NotificationManager) getSystemService(
+                          Context.NOTIFICATION_SERVICE);
+
+                  if (manager == null) {
+                      return;
+                  }
+
+                  Intent intent = new Intent(this, MainActivity.class);
+
+                  PendingIntent pendingIntent = PendingIntent.getActivity(
+                      this,
+                      0,
+                      intent,
+                      PendingIntent.FLAG_UPDATE_CURRENT |
+                          PendingIntent.FLAG_IMMUTABLE);
+
+                  Notification notification =
+                      new Notification.Builder(this, "cudyguard_status")
+                          .setSmallIcon(android.R.drawable.stat_notify_sync)
+                          .setContentTitle(title)
+                          .setContentText(message)
+                          .setContentIntent(pendingIntent)
+                          .setAutoCancel(true)
+                          .build();
+
+                  manager.notify(1001, notification);
               }
           }
           EOF
+
+          sed -i '/import android.app.PendingIntent;/a import android.content.Intent;' \
+            app/src/main/java/com/h16h/cudyguard/MainActivity.java
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
